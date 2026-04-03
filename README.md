@@ -1,4 +1,4 @@
-Hi my Name is Maiky And i have  Ported Mcgltf To  Fabric 1.20.1 And Renamed It CustomGltf
+Hi my Name is Maiky And i have  Ported Mcgltf To  Fabric 1.20.1 And Renamed It to CustomGltf
 
 Credits
 
