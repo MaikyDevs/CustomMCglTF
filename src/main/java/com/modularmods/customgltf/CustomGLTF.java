@@ -28,6 +28,7 @@ import org.lwjgl.opengl.GL40;
 import org.lwjgl.opengl.GL43;
 import org.lwjgl.opengl.GLCapabilities;
 
+import com.mojang.blaze3d.vertex.BufferUploader;
 import com.modularmods.customgltf.iris.RenderedGltfModelGL30Iris;
 import com.modularmods.customgltf.iris.RenderedGltfModelGL33Iris;
 import com.modularmods.customgltf.iris.RenderedGltfModelGL40Iris;
@@ -73,7 +74,14 @@ public class CustomGLTF implements ModInitializer {
 	
 	public CustomGLTF() {
 		INSTANCE = this;
-		renderedModelGLProfile = EnumRenderedModelGLProfile.valueOf(SimpleConfig.of(MODID).provider(this::provider).request().getOrDefault("RenderedModelGLProfile", "AUTO"));
+		EnumRenderedModelGLProfile profile;
+		try {
+			String configVal = SimpleConfig.of(MODID).provider(this::provider).request().getOrDefault("RenderedModelGLProfile", "AUTO");
+			profile = EnumRenderedModelGLProfile.valueOf(configVal.toUpperCase());
+		} catch (Exception e) {
+			profile = EnumRenderedModelGLProfile.AUTO;
+		}
+		renderedModelGLProfile = profile;
 	}
 	
 	@Override
@@ -149,8 +157,6 @@ public class CustomGLTF implements ModInitializer {
 		}
 		
 		Minecraft.getInstance().execute(() -> {
-			lightTexture = Minecraft.getInstance().getTextureManager().getTexture(new ResourceLocation("dynamic/light_map_1"));
-			
 			switch(renderedModelGLProfile) {
 			case GL43:
 				createSkinningProgramGL43();
@@ -168,12 +174,16 @@ public class CustomGLTF implements ModInitializer {
 				break;
 			}
 			
+			int prevRowLength = GL11.glGetInteger(GL11.GL_UNPACK_ROW_LENGTH);
+			int prevSkipRows = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_ROWS);
+			int prevSkipPixels = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_PIXELS);
+			int prevAlignment = GL11.glGetInteger(GL11.GL_UNPACK_ALIGNMENT);
+			int currentTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+			
 			GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, 0);
 			GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, 0);
 			GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, 0);
 			GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
-			
-			int currentTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
 			
 			defaultColorMap = GL11.glGenTextures();
 			GL11.glBindTexture(GL11.GL_TEXTURE_2D, defaultColorMap);
@@ -186,6 +196,11 @@ public class CustomGLTF implements ModInitializer {
 			GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, 2, 2, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, Buffers.create(new byte[]{-128, -128, -1, -1, -128, -128, -1, -1, -128, -128, -1, -1, -128, -128, -1, -1}));
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_BASE_LEVEL, 0);
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL, 0);
+			
+			GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, prevRowLength);
+			GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, prevSkipRows);
+			GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, prevSkipPixels);
+			GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, prevAlignment);
 			
 			GL11.glBindTexture(GL11.GL_TEXTURE_2D, currentTexture);
 		});
@@ -202,12 +217,19 @@ public class CustomGLTF implements ModInitializer {
 				gltfRenderData.forEach(Runnable::run);
 				gltfRenderData.clear();
 				
+				int currentVAO = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+				int currentArrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
+				int currentElementArrayBuffer = GL11.glGetInteger(GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING);
+				int prevRowLength = GL11.glGetInteger(GL11.GL_UNPACK_ROW_LENGTH);
+				int prevSkipRows = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_ROWS);
+				int prevSkipPixels = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_PIXELS);
+				int prevAlignment = GL11.glGetInteger(GL11.GL_UNPACK_ALIGNMENT);
+				int currentTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+				
 				GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, 0);
 				GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, 0);
 				GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, 0);
 				GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
-				
-				int currentTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
 				
 				Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup = new HashMap<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>();
 				gltfModelReceivers.forEach((receiver) -> {
@@ -221,17 +243,32 @@ public class CustomGLTF implements ModInitializer {
 				});
 				lookup.entrySet().parallelStream().forEach((entry) -> {
 					try {
-						entry.getValue().setLeft(new GltfModelReader().readWithoutReferences(new BufferedInputStream(Minecraft.getInstance().getResourceManager().getResource(entry.getKey()).orElseThrow().open())));
-					} catch (IOException e) {
-						e.printStackTrace();
+						var optionalResource = Minecraft.getInstance().getResourceManager().getResource(entry.getKey());
+						if (optionalResource.isPresent()) {
+							entry.getValue().setLeft(new GltfModelReader().readWithoutReferences(new BufferedInputStream(optionalResource.get().open())));
+						} else {
+							logger.error("Failed to find glTF model resource: {}", entry.getKey());
+						}
+					} catch (Exception e) {
+						logger.error("Failed to load glTF model resource: " + entry.getKey(), e);
 					}
 				});
-				processRenderedGltfModelSelector.accept(lookup);
-				GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-				GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-				GL30.glBindVertexArray(0);
+				if(!lookup.isEmpty()) {
+					processRenderedGltfModelSelector.accept(lookup);
+				}
+				
+				GL30.glBindVertexArray(currentVAO);
+				GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, currentArrayBuffer);
+				GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, currentElementArrayBuffer);
+				
+				GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, prevRowLength);
+				GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, prevSkipRows);
+				GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, prevSkipPixels);
+				GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, prevAlignment);
 				
 				GL11.glBindTexture(GL11.GL_TEXTURE_2D, currentTexture);
+				
+				BufferUploader.reset();
 				
 				loadedBufferResources.clear();
 				loadedImageResources.clear();
@@ -257,6 +294,9 @@ public class CustomGLTF implements ModInitializer {
 	}
 	
 	public AbstractTexture getLightTexture() {
+		if(lightTexture == null) {
+			lightTexture = Minecraft.getInstance().getTextureManager().getTexture(new ResourceLocation("dynamic/light_map_1"));
+		}
 		return lightTexture;
 	}
 	
@@ -425,6 +465,9 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModelsGL43(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModel::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
 		GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, 0);
 		GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
@@ -432,6 +475,9 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModelsGL40(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL40::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
 		GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
 		GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
@@ -439,16 +485,25 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModelsGL33(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL33::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
 		GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
 	}
 	
 	private void processRenderedGltfModelsGL30(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL30::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
 	
 	private void processRenderedGltfModelsGL43Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelIris::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
 		GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, 0);
 		GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
@@ -456,6 +511,9 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModelsGL40Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL40Iris::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
 		GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
 		GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
@@ -463,12 +521,18 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModelsGL33Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL33Iris::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
 		GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
 	}
 	
 	private void processRenderedGltfModelsGL30Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL30Iris::new);
+		GL30.glBindVertexArray(0);
+		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
 	
 	public enum EnumRenderedModelGLProfile {
