@@ -15,6 +15,7 @@ public abstract class SphericalLinearInterpolatedChannel extends InterpolatedCha
 	
 	@Override
 	public void update(float timeS) {
+		if(timesS == null || timesS.length == 0) return;
 		float[] output = getListener();
 		if(timeS <= timesS[0]) {
 			System.arraycopy(values[0], 0, output, 0, output.length);
@@ -52,6 +53,7 @@ public abstract class SphericalLinearInterpolatedChannel extends InterpolatedCha
 				bw = -bw;
 				dot = -dot;
 			}
+			dot = Math.max(-1.0f, Math.min(1.0f, dot));
 			float epsilon = 1e-6f;
 			float s0, s1;
 			if ((1.0 - dot) > epsilon)

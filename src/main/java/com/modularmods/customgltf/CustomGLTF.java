@@ -29,26 +29,24 @@ import org.lwjgl.opengl.GL43;
 import org.lwjgl.opengl.GLCapabilities;
 
 import com.mojang.blaze3d.vertex.BufferUploader;
-import com.modularmods.customgltf.iris.RenderedGltfModelGL30Iris;
-import com.modularmods.customgltf.iris.RenderedGltfModelGL33Iris;
-import com.modularmods.customgltf.iris.RenderedGltfModelGL40Iris;
-import com.modularmods.customgltf.iris.RenderedGltfModelIris;
 
 import de.javagl.jgltf.model.GltfModel;
 import de.javagl.jgltf.model.io.Buffers;
 import de.javagl.jgltf.model.io.GltfModelReader;
-import net.fabricmc.api.ModInitializer;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.AbstractTexture;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManager;
 import simplelibs.SimpleConfig;
 
-public class CustomGLTF implements ModInitializer {
+public class CustomGLTF implements ClientModInitializer {
 
 	public static final String MODID = "customgltf";
 	public static final String RESOURCE_LOCATION = "resourceLocation";
@@ -71,6 +69,7 @@ public class CustomGLTF implements ModInitializer {
 	private final List<Runnable> gltfRenderData = new ArrayList<Runnable>();
 	
 	private BooleanSupplier shaderModActive;
+	private static boolean warnedShaders = false;
 	
 	public CustomGLTF() {
 		INSTANCE = this;
@@ -85,77 +84,37 @@ public class CustomGLTF implements ModInitializer {
 	}
 	
 	@Override
-	public void onInitialize() {
-		Consumer<Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>> processRenderedGltfModelSelector;
-		if(FabricLoader.getInstance().isModLoaded("iris")) {
-			shaderModActive = net.irisshaders.iris.api.v0.IrisApi.getInstance()::isShaderPackInUse;
-			
-			processRenderedGltfModelSelector = (lookup) -> {
-				switch(renderedModelGLProfile) {
-				case GL43:
-					processRenderedGltfModelsGL43Iris(lookup);
-					break;
-				case GL40:
-					processRenderedGltfModelsGL40Iris(lookup);
-					break;
-				case GL33:
-					processRenderedGltfModelsGL33Iris(lookup);
-					break;
-				case GL30:
-					processRenderedGltfModelsGL30Iris(lookup);
-					break;
-				default:
-					GLCapabilities glCapabilities = GL.getCapabilities();
-					if(glCapabilities.glTexBufferRange != 0) processRenderedGltfModelsGL43Iris(lookup);
-					else if(glCapabilities.glGenTransformFeedbacks != 0) processRenderedGltfModelsGL40Iris(lookup);
-					else processRenderedGltfModelsGL33Iris(lookup);
-					break;
-				}
-			};
-		}
-		else {
-			if(FabricLoader.getInstance().isModLoaded("optifabric")) {
-				// Use reflection to avoid compile-time dependency on OptiFine
-				shaderModActive = () -> {
-					try {
-						Class<?> shadersClass = Class.forName("net.optifine.shaders.Shaders");
-						boolean isInitialized = shadersClass.getField("isShaderPackInitialized").getBoolean(null);
-						String currentShader = (String) shadersClass.getField("currentShaderName").get(null);
-						String defaultShader = (String) shadersClass.getField("SHADER_PACK_NAME_DEFAULT").get(null);
-						return isInitialized && !currentShader.equals(defaultShader);
-					} catch (Exception e) {
-						return false;
-					}
-				};
+	public void onInitializeClient() {
+		shaderModActive = CustomGLTF::isShadersActive;
+
+		Consumer<Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>> processRenderedGltfModelSelector = (lookup) -> {
+			switch(renderedModelGLProfile) {
+			case GL43:
+				processRenderedGltfModelsGL43(lookup);
+				break;
+			case GL40:
+				processRenderedGltfModelsGL40(lookup);
+				break;
+			case GL33:
+				processRenderedGltfModelsGL33(lookup);
+				break;
+			case GL30:
+				processRenderedGltfModelsGL30(lookup);
+				break;
+			default:
+				GLCapabilities glCapabilities = GL.getCapabilities();
+				if(glCapabilities.glTexBufferRange != 0) processRenderedGltfModelsGL43(lookup);
+				else if(glCapabilities.glGenTransformFeedbacks != 0) processRenderedGltfModelsGL40(lookup);
+				else processRenderedGltfModelsGL33(lookup);
+				break;
 			}
-			else {
-				shaderModActive = () -> false;
-			}
-			
-			processRenderedGltfModelSelector = (lookup) -> {
-				switch(renderedModelGLProfile) {
-				case GL43:
-					processRenderedGltfModelsGL43(lookup);
-					break;
-				case GL40:
-					processRenderedGltfModelsGL40(lookup);
-					break;
-				case GL33:
-					processRenderedGltfModelsGL33(lookup);
-					break;
-				case GL30:
-					processRenderedGltfModelsGL30(lookup);
-					break;
-				default:
-					GLCapabilities glCapabilities = GL.getCapabilities();
-					if(glCapabilities.glTexBufferRange != 0) processRenderedGltfModelsGL43(lookup);
-					else if(glCapabilities.glGenTransformFeedbacks != 0) processRenderedGltfModelsGL40(lookup);
-					else processRenderedGltfModelsGL33(lookup);
-					break;
-				}
-			};
-		}
+		};
 		
+		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+			resetShaderWarning();
+			client.execute(CustomGLTF::checkAndWarnShaders);
+		});
+
 		Minecraft.getInstance().execute(() -> {
 			switch(renderedModelGLProfile) {
 			case GL43:
@@ -190,12 +149,16 @@ public class CustomGLTF implements ModInitializer {
 			GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, 2, 2, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, Buffers.create(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}));
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_BASE_LEVEL, 0);
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL, 0);
+			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
 			
 			defaultNormalMap = GL11.glGenTextures();
 			GL11.glBindTexture(GL11.GL_TEXTURE_2D, defaultNormalMap);
 			GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, 2, 2, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, Buffers.create(new byte[]{-128, -128, -1, -1, -128, -128, -1, -1, -128, -128, -1, -1, -128, -128, -1, -1}));
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_BASE_LEVEL, 0);
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL, 0);
+			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
 			
 			GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, prevRowLength);
 			GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, prevSkipRows);
@@ -234,6 +197,7 @@ public class CustomGLTF implements ModInitializer {
 				Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup = new HashMap<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>>();
 				gltfModelReceivers.forEach((receiver) -> {
 					ResourceLocation modelLocation = receiver.getModelLocation();
+					if (modelLocation == null) return;
 					MutablePair<GltfModel, List<IGltfModelReceiver>> receivers = lookup.get(modelLocation);
 					if(receivers == null) {
 						receivers = MutablePair.of(null, new ArrayList<IGltfModelReceiver>());
@@ -245,7 +209,9 @@ public class CustomGLTF implements ModInitializer {
 					try {
 						var optionalResource = Minecraft.getInstance().getResourceManager().getResource(entry.getKey());
 						if (optionalResource.isPresent()) {
-							entry.getValue().setLeft(new GltfModelReader().readWithoutReferences(new BufferedInputStream(optionalResource.get().open())));
+							try (java.io.InputStream is = optionalResource.get().open()) {
+								entry.getValue().setLeft(new GltfModelReader().readWithoutReferences(new BufferedInputStream(is)));
+							}
 						} else {
 							logger.error("Failed to find glTF model resource: {}", entry.getKey());
 						}
@@ -275,6 +241,56 @@ public class CustomGLTF implements ModInitializer {
 			}
 			
 		});
+	}
+
+	public static boolean isIrisShadersActive() {
+		if (!FabricLoader.getInstance().isModLoaded("iris")) {
+			return false;
+		}
+		try {
+			Class<?> irisApiClass = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+			Object irisApi = irisApiClass.getMethod("getInstance").invoke(null);
+			return (boolean) irisApiClass.getMethod("isShaderPackInUse").invoke(irisApi);
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	public static boolean isOptifineShadersActive() {
+		if (!FabricLoader.getInstance().isModLoaded("optifabric")) {
+			return false;
+		}
+		try {
+			Class<?> shadersClass = Class.forName("net.optifine.shaders.Shaders");
+			boolean isInitialized = shadersClass.getField("isShaderPackInitialized").getBoolean(null);
+			String currentShader = (String) shadersClass.getField("currentShaderName").get(null);
+			String defaultShader = (String) shadersClass.getField("SHADER_PACK_NAME_DEFAULT").get(null);
+			return isInitialized && currentShader != null && !currentShader.equals(defaultShader);
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	public static boolean isShadersActive() {
+		return isIrisShadersActive() || isOptifineShadersActive();
+	}
+
+	public static void resetShaderWarning() {
+		warnedShaders = false;
+	}
+
+	public static void checkAndWarnShaders() {
+		if (warnedShaders) return;
+		if (isShadersActive()) {
+			warnedShaders = true;
+			Minecraft mc = Minecraft.getInstance();
+			if (mc.player != null) {
+				mc.player.sendSystemMessage(Component.translatableWithFallback(
+					"customgltf.warning.shaders",
+					"§c[CustomGLTF] §eWarning: Shaders / Iris are active! CustomGLTF does not support shaders. glTF models will not render properly while shaders are enabled."
+				));
+			}
+		}
 	}
 
 	public int getGlProgramSkinnig() {
@@ -311,10 +327,10 @@ public class CustomGLTF implements ModInitializer {
 					@Override
 					public synchronized ByteBuffer get() {
 						if(bufferData == null) {
-							try {
-								bufferData = Buffers.create(IOUtils.toByteArray(new BufferedInputStream(Minecraft.getInstance().getResourceManager().getResource(location).orElseThrow().open())));
-							} catch (IOException e) {
-								e.printStackTrace();
+							try (java.io.InputStream is = Minecraft.getInstance().getResourceManager().getResource(location).orElseThrow().open()) {
+								bufferData = Buffers.create(IOUtils.toByteArray(new BufferedInputStream(is)));
+							} catch (Exception e) {
+								logger.error("Failed to load buffer resource: " + location, e);
 							}
 						}
 						return bufferData;
@@ -338,10 +354,10 @@ public class CustomGLTF implements ModInitializer {
 					@Override
 					public synchronized ByteBuffer get() {
 						if(bufferData == null) {
-							try {
-								bufferData = Buffers.create(IOUtils.toByteArray(new BufferedInputStream(Minecraft.getInstance().getResourceManager().getResource(location).orElseThrow().open())));
-							} catch (IOException e) {
-								e.printStackTrace();
+							try (java.io.InputStream is = Minecraft.getInstance().getResourceManager().getResource(location).orElseThrow().open()) {
+								bufferData = Buffers.create(IOUtils.toByteArray(new BufferedInputStream(is)));
+							} catch (Exception e) {
+								logger.error("Failed to load image resource: " + location, e);
 							}
 						}
 						return bufferData;
@@ -363,7 +379,7 @@ public class CustomGLTF implements ModInitializer {
 	}
 	
 	public boolean isShaderModActive() {
-		return shaderModActive.getAsBoolean();
+		return shaderModActive != null && shaderModActive.getAsBoolean();
 	}
 	
 	public static CustomGLTF getInstance() {
@@ -444,6 +460,9 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModels(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup, BiFunction<List<Runnable>, GltfModel, RenderedGltfModel> renderedGltfModelBuilder) {
 		lookup.forEach((modelLocation, receivers) -> {
+			if (receivers.getLeft() == null) {
+				return;
+			}
 			Iterator<IGltfModelReceiver> iterator = receivers.getRight().iterator();
 			do {
 				IGltfModelReceiver receiver = iterator.next();
@@ -494,42 +513,6 @@ public class CustomGLTF implements ModInitializer {
 	
 	private void processRenderedGltfModelsGL30(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
 		processRenderedGltfModels(lookup, RenderedGltfModelGL30::new);
-		GL30.glBindVertexArray(0);
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-	}
-	
-	private void processRenderedGltfModelsGL43Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
-		processRenderedGltfModels(lookup, RenderedGltfModelIris::new);
-		GL30.glBindVertexArray(0);
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
-		GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, 0);
-		GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
-	}
-	
-	private void processRenderedGltfModelsGL40Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
-		processRenderedGltfModels(lookup, RenderedGltfModelGL40Iris::new);
-		GL30.glBindVertexArray(0);
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
-		GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
-		GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
-	}
-	
-	private void processRenderedGltfModelsGL33Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
-		processRenderedGltfModels(lookup, RenderedGltfModelGL33Iris::new);
-		GL30.glBindVertexArray(0);
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-		GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, 0);
-		GL15.glBindBuffer(GL31.GL_TEXTURE_BUFFER, 0);
-	}
-	
-	private void processRenderedGltfModelsGL30Iris(Map<ResourceLocation, MutablePair<GltfModel, List<IGltfModelReceiver>>> lookup) {
-		processRenderedGltfModels(lookup, RenderedGltfModelGL30Iris::new);
 		GL30.glBindVertexArray(0);
 		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
 		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);

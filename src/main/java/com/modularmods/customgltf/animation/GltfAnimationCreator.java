@@ -43,6 +43,9 @@ public final class GltfAnimationCreator {
 			AccessorFloatData outputFloatData = (AccessorFloatData)outputData;
 			
 			int numKeyElements = inputFloatData.getNumElements();
+			if (numKeyElements == 0) {
+				continue;
+			}
 			float[] keys = new float[numKeyElements];
 			for(int e = 0; e < numKeyElements; e++) {
 				keys[e] = inputFloatData.get(e);

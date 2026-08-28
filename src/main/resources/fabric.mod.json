@@ -17,14 +17,10 @@
 
   "environment": "client",
   "entrypoints": {
-    "main": [
+    "client": [
       "com.modularmods.customgltf.CustomGLTF"
     ]
   },
-  "mixins": [
-    "customgltf.iris.mixins.json"
-  ],
-
   "depends": {
     "fabricloader": ">=0.14.21",
     "fabric": "*",
@@ -32,7 +28,6 @@
     "java": ">=17"
   },
   "suggests": {
-    "optifabric": "*",
-    "iris": ">=1.6.0"
+    "optifabric": "*"
   }
 }

@@ -1,0 +1,3 @@
+{
+  "customgltf.warning.shaders": "§c[CustomGLTF] §eWarning: Shaders / Iris are active! CustomGLTF does not support shaders. glTF models will not render properly while shaders are enabled."
+}

@@ -61,22 +61,12 @@ public class RenderedGltfModel {
 	 * This may change in different Minecraft version.</br>
 	 * <a href="https://github.com/sp614x/optifine/blob/master/OptiFineDoc/doc/shaders.txt">optifine/shaders.txt</a>
 	 */
-	public static final int mc_midTexCoord;
+	public static final int mc_midTexCoord = 12;
+	public static final int at_tangent = 13;
 	
-	/**
-	 * ShaderMod attribute location for Tangent.</br>
-	 * This may change in different Minecraft version.</br>
-	 * <a href="https://github.com/sp614x/optifine/blob/master/OptiFineDoc/doc/shaders.txt">optifine/shaders.txt</a>
-	 */
-	public static final int at_tangent;
-	
-	/**
-	 * ShaderMod Texture index, this may change in different Minecraft version.</br>
-	 * <a href="https://github.com/sp614x/optifine/blob/master/OptiFineDoc/doc/shaders.txt">optifine/shaders.txt</a>
-	 */
 	public static final int COLOR_MAP_INDEX = GL13.GL_TEXTURE0;
-	public static int NORMAL_MAP_INDEX = GL13.GL_TEXTURE1;
-	public static int SPECULAR_MAP_INDEX = GL13.GL_TEXTURE3;
+	public static int NORMAL_MAP_INDEX = -1;
+	public static int SPECULAR_MAP_INDEX = -1;
 	
 	public static int MODEL_VIEW_MATRIX;
 	public static int MODEL_VIEW_MATRIX_INVERSE;
@@ -89,19 +79,21 @@ public class RenderedGltfModel {
 	public static final int vaUV2 = 4;
 	public static final int vaNormal = 5;
 	
-	protected static final Runnable vanillaDefaultMaterialCommand = () -> {
-		GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultColorMap());
-		GL20.glVertexAttrib4f(vaColor, 1.0F, 1.0F, 1.0F, 1.0F);
-		GL11.glEnable(GL11.GL_CULL_FACE);
-	};
-	
-	protected static final Runnable shaderModDefaultMaterialCommand;
-	
 	public static ShaderInstance CURRENT_SHADER_INSTANCE;
-	protected static Matrix4f CURRENT_POSE;
-	protected static Matrix3f CURRENT_NORMAL;
-	public static Vector3f LIGHT0_DIRECTION;
-	public static Vector3f LIGHT1_DIRECTION;
+	public static Matrix4f CURRENT_POSE = new Matrix4f();
+	public static Matrix3f CURRENT_NORMAL = new Matrix3f();
+	public static Vector3f LIGHT0_DIRECTION = new Vector3f(0.2F, 1.0F, -0.7F).normalize();
+	public static Vector3f LIGHT1_DIRECTION = new Vector3f(-0.2F, 1.0F, 0.7F).normalize();
+	
+	public static void setCurrentPose(com.mojang.blaze3d.vertex.PoseStack poseStack) {
+		if (poseStack != null) {
+			CURRENT_POSE = new Matrix4f(poseStack.last().pose());
+			CURRENT_NORMAL = new Matrix3f(poseStack.last().normal());
+		} else {
+			CURRENT_POSE = new Matrix4f();
+			CURRENT_NORMAL = new Matrix3f();
+		}
+	}
 	
 	protected static final int skinning_joint = 0;
 	protected static final int skinning_weight = 1;
@@ -133,48 +125,21 @@ public class RenderedGltfModel {
 	protected final Map<BufferViewModel, Integer> bufferViewModelToGlBufferView = new IdentityHashMap<BufferViewModel, Integer>();
 	protected final Map<TextureModel, Integer> textureModelToGlTexture = new IdentityHashMap<TextureModel, Integer>();
 	protected final Map<MaterialModel, Material> materialModelToRenderedMaterial = new IdentityHashMap<MaterialModel, Material>();
+
+	protected static final Runnable vanillaDefaultMaterialCommand = () -> {
+		com.mojang.blaze3d.platform.GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+		com.mojang.blaze3d.platform.GlStateManager._bindTexture(CustomGLTF.getInstance().getDefaultColorMap());
+		GL20.glVertexAttrib4f(vaColor, 1.0F, 1.0F, 1.0F, 1.0F);
+		com.mojang.blaze3d.platform.GlStateManager._enableCull();
+		com.mojang.blaze3d.platform.GlStateManager._enableBlend();
+		com.mojang.blaze3d.platform.GlStateManager._blendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+	};
+	
+	protected static final Runnable shaderModDefaultMaterialCommand = vanillaDefaultMaterialCommand;
 	
 	public final GltfModel gltfModel;
-	
 	public final List<RenderedGltfScene> renderedGltfScenes;
-	
-	static {
-		if(FabricLoader.getInstance().isModLoaded("iris")) {
-			mc_midTexCoord = 7;
-			at_tangent = 8;
-			
-			shaderModDefaultMaterialCommand = () -> {
-				GL13.glActiveTexture(COLOR_MAP_INDEX);
-				GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultColorMap());
-				if(NORMAL_MAP_INDEX != -1) {
-					GL13.glActiveTexture(NORMAL_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultNormalMap());
-				}
-				if(SPECULAR_MAP_INDEX != -1) {
-					GL13.glActiveTexture(SPECULAR_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultSpecularMap());
-				}
-				GL20.glVertexAttrib4f(vaColor, 1.0F, 1.0F, 1.0F, 1.0F);
-				GL11.glEnable(GL11.GL_CULL_FACE);
-			};
-		}
-		else {
-			mc_midTexCoord = 12;
-			at_tangent = 13;
-			
-			shaderModDefaultMaterialCommand = () -> {
-				GL13.glActiveTexture(COLOR_MAP_INDEX);
-				GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultColorMap());
-				GL13.glActiveTexture(NORMAL_MAP_INDEX);
-				GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultNormalMap());
-				GL13.glActiveTexture(SPECULAR_MAP_INDEX);
-				GL11.glBindTexture(GL11.GL_TEXTURE_2D, CustomGLTF.getInstance().getDefaultSpecularMap());
-				GL20.glVertexAttrib4f(vaColor, 1.0F, 1.0F, 1.0F, 1.0F);
-				GL11.glEnable(GL11.GL_CULL_FACE);
-			};
-		}
-	}
-	
+
 	protected RenderedGltfModel(GltfModel gltfModel, List<RenderedGltfScene> renderedGltfScenes) {
 		this.gltfModel = gltfModel;
 		this.renderedGltfScenes = renderedGltfScenes;
@@ -3292,6 +3257,8 @@ public class RenderedGltfModel {
 		public TextureInfo specularTexture;
 		public float[] baseColorFactor;
 		public Boolean doubleSided;
+		public String alphaMode;
+		public Float alphaCutoff;
 		
 		public Runnable vanillaMaterialCommand;
 		public Runnable shaderModMaterialCommand;
@@ -3338,8 +3305,9 @@ public class RenderedGltfModel {
 				else specularMap = renderedModel.obtainGlTexture(gltfRenderData, textureModels.get(specularTexture.index));
 				
 				if(baseColorFactor == null) baseColorFactor = materialModelV2.getBaseColorFactor();
-				
 				if(doubleSided == null) doubleSided = materialModelV2.isDoubleSided();
+				if(alphaMode == null && materialModelV2.getAlphaMode() != null) alphaMode = materialModelV2.getAlphaMode().name();
+				if(alphaCutoff == null) alphaCutoff = materialModelV2.getAlphaCutoff();
 			}
 			else {
 				colorMap = baseColorTexture == null ? CustomGLTF.getInstance().getDefaultColorMap() : renderedModel.obtainGlTexture(gltfRenderData, textureModels.get(baseColorTexture.index));
@@ -3348,41 +3316,25 @@ public class RenderedGltfModel {
 				if(baseColorFactor == null) baseColorFactor = new float[]{1.0F, 1.0F, 1.0F, 1.0F};
 				if(doubleSided == null) doubleSided = false;
 			}
+			if(alphaMode == null) alphaMode = "MASK";
+			if(alphaCutoff == null) alphaCutoff = 0.1F;
 			
-			if(doubleSided) {
-				vanillaMaterialCommand = () -> {
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, colorMap);
-					GL20.glVertexAttrib4f(vaColor, baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
-					GL11.glDisable(GL11.GL_CULL_FACE);
-				};
-				shaderModMaterialCommand = () -> {
-					GL13.glActiveTexture(COLOR_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, colorMap);
-					GL13.glActiveTexture(NORMAL_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, normalMap);
-					GL13.glActiveTexture(SPECULAR_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, specularMap);
-					GL20.glVertexAttrib4f(vaColor, baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
-					GL11.glDisable(GL11.GL_CULL_FACE);
-				};
-			}
-			else {
-				vanillaMaterialCommand = () -> {
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, colorMap);
-					GL20.glVertexAttrib4f(vaColor, baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
-					GL11.glEnable(GL11.GL_CULL_FACE);
-				};
-				shaderModMaterialCommand = () -> {
-					GL13.glActiveTexture(COLOR_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, colorMap);
-					GL13.glActiveTexture(NORMAL_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, normalMap);
-					GL13.glActiveTexture(SPECULAR_MAP_INDEX);
-					GL11.glBindTexture(GL11.GL_TEXTURE_2D, specularMap);
-					GL20.glVertexAttrib4f(vaColor, baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
-					GL11.glEnable(GL11.GL_CULL_FACE);
-				};
-			}
+			boolean isBlend = "BLEND".equalsIgnoreCase(alphaMode);
+			boolean isDoubleSided = Boolean.TRUE.equals(doubleSided);
+			
+			vanillaMaterialCommand = () -> {
+				com.mojang.blaze3d.platform.GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+				com.mojang.blaze3d.platform.GlStateManager._bindTexture(colorMap);
+				GL20.glVertexAttrib4f(vaColor, baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
+				if(isDoubleSided) {
+					com.mojang.blaze3d.platform.GlStateManager._disableCull();
+				} else {
+					com.mojang.blaze3d.platform.GlStateManager._enableCull();
+				}
+				com.mojang.blaze3d.platform.GlStateManager._enableBlend();
+				com.mojang.blaze3d.platform.GlStateManager._blendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+			};
+			shaderModMaterialCommand = vanillaMaterialCommand;
 		}
 	}
 	
@@ -3455,6 +3407,12 @@ public class RenderedGltfModel {
 			int wrapT = Optionals.of(
 				textureModel.getWrapT(),
 				GL11.GL_REPEAT);
+			
+			if (minFilter == GL11.GL_NEAREST_MIPMAP_NEAREST || minFilter == GL11.GL_NEAREST_MIPMAP_LINEAR) {
+				minFilter = GL11.GL_NEAREST;
+			} else if (minFilter == GL11.GL_LINEAR_MIPMAP_NEAREST || minFilter == GL11.GL_LINEAR_MIPMAP_LINEAR) {
+				minFilter = GL11.GL_LINEAR;
+			}
 			
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_BASE_LEVEL, 0);
 			GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL, 0);
@@ -5050,7 +5008,7 @@ public class RenderedGltfModel {
 		return baseAccessorModel;
 	}
 	
-	protected static float[] findGlobalTransform(NodeModel nodeModel) {
+	public static float[] findGlobalTransform(NodeModel nodeModel) {
 		float[] found = NODE_GLOBAL_TRANSFORMATION_LOOKUP_CACHE.get(nodeModel);
 		if(found != null) {
 			return found;
@@ -5115,11 +5073,97 @@ public class RenderedGltfModel {
 	}
 	
 	public static void setCurrentPose(Matrix4f currentPose) {
-		CURRENT_POSE = currentPose;
+		CURRENT_POSE = currentPose != null ? currentPose : new Matrix4f();
 	}
 	
 	public static void setCurrentNormal(Matrix3f currentNormal) {
-		CURRENT_NORMAL = currentNormal;
+		CURRENT_NORMAL = currentNormal != null ? currentNormal : new Matrix3f();
+	}
+
+	private com.modularmods.customgltf.animation.GltfAnimationController animationController;
+	private com.modularmods.customgltf.animation.GltfProceduralController proceduralController;
+
+	/**
+	 * Renders this glTF model using the given PoseStack.
+	 */
+	public void render(com.mojang.blaze3d.vertex.PoseStack poseStack) {
+		com.modularmods.customgltf.api.GltfRenderHelper.renderModel(this, poseStack);
+	}
+
+	/**
+	 * Renders this glTF model with light and overlay parameters.
+	 */
+	public void render(com.mojang.blaze3d.vertex.PoseStack poseStack, int packedLight, int packedOverlay) {
+		com.modularmods.customgltf.api.GltfRenderHelper.renderModel(this, poseStack);
+	}
+
+	/**
+	 * Renders this glTF model with color tinting.
+	 */
+	public void renderWithTint(com.mojang.blaze3d.vertex.PoseStack poseStack, float r, float g, float b, float a) {
+		com.modularmods.customgltf.api.GltfRenderHelper.renderModelWithTint(this, poseStack, r, g, b, a);
+	}
+
+	/**
+	 * Gets or lazily initializes the animation controller for this model.
+	 */
+	public synchronized com.modularmods.customgltf.animation.GltfAnimationController getAnimationController() {
+		if (animationController == null) {
+			animationController = new com.modularmods.customgltf.animation.GltfAnimationController(this);
+		}
+		return animationController;
+	}
+
+	/**
+	 * Gets or lazily initializes the procedural controller for this model.
+	 */
+	public synchronized com.modularmods.customgltf.animation.GltfProceduralController getProceduralController() {
+		if (proceduralController == null) {
+			proceduralController = new com.modularmods.customgltf.animation.GltfProceduralController(this);
+		}
+		return proceduralController;
+	}
+
+	/**
+	 * Finds a NodeModel by name in this model.
+	 */
+	public NodeModel findNode(String nodeName) {
+		return com.modularmods.customgltf.api.GltfNodeAttachment.findNode(this, nodeName);
+	}
+
+	/**
+	 * Gets the global 4x4 matrix for a named bone/node.
+	 */
+	public Matrix4f getNodeTransform(String nodeName) {
+		return com.modularmods.customgltf.api.GltfNodeAttachment.getNodeGlobalTransform(this, nodeName);
+	}
+
+	/**
+	 * Gets the global 3D position for a named bone/node.
+	 */
+	public Vector3f getNodePosition(String nodeName) {
+		return com.modularmods.customgltf.api.GltfNodeAttachment.getNodePosition(this, nodeName);
+	}
+
+	/**
+	 * Gets the global rotation quaternion for a named bone/node.
+	 */
+	public org.joml.Quaternionf getNodeRotation(String nodeName) {
+		return com.modularmods.customgltf.api.GltfNodeAttachment.getNodeRotation(this, nodeName);
+	}
+
+	/**
+	 * Multiplies target PoseStack with the global transform of the named bone.
+	 */
+	public boolean applyNodeTransform(String nodeName, com.mojang.blaze3d.vertex.PoseStack targetPoseStack) {
+		return com.modularmods.customgltf.api.GltfNodeAttachment.applyNodeTransform(this, nodeName, targetPoseStack);
+	}
+
+	/**
+	 * Computes the 3D Axis-Aligned Bounding Box (AABB) of this model.
+	 */
+	public net.minecraft.world.phys.AABB getBoundingBox() {
+		return com.modularmods.customgltf.api.GltfBoundingBox.computeModelBounds(this.gltfModel);
 	}
 
 }

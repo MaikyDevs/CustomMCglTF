@@ -15,6 +15,7 @@ public abstract class CubicSplineInterpolatedChannel extends InterpolatedChannel
 	
 	@Override
 	public void update(float timeS) {
+		if(timesS == null || timesS.length == 0) return;
 		float[] output = getListener();
 		if(timeS <= timesS[0]) {
 			System.arraycopy(values[0][1], 0, output, 0, output.length);

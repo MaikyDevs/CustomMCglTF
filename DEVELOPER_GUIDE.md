@@ -1,56 +1,30 @@
-# CustomGLTF Developer Guide
+# CustomGLTF Developer Guide & API Reference (v1.2)
 
-## Overview
+Welcome to **CustomGLTF** (Minecraft 1.20.1 Fabric) — the high-performance 3D rendering library for Minecraft mod developers.
 
-CustomGLTF is a library for loading and rendering glTF 2.0 models in Minecraft 1.20.1 Fabric. This is a port of MCglTF with updated dependencies and renamed packages.
+CustomGLTF empowers you to load, animate, attach, and render standard **glTF 2.0 / GLB** models directly in Minecraft with full hardware skinning, bone sockets, procedural animation, and seamless transparency handling.
 
-## What Changed from MCglTF
+---
 
-### Package Names
-- `com.modularmods.mcgltf` → `com.modularmods.customgltf`
-- All class imports need to be updated
+## Table of Contents
+1. [Gradle Dependency & Setup](#1-gradle-dependency--setup)
+2. [Loading a glTF Model](#2-loading-a-gltf-model)
+3. [Rendering Models](#3-rendering-models)
+4. [Animation Controller & State Machine](#4-animation-controller--state-machine)
+5. [Bone Sockets & Attachment System](#5-bone-sockets--attachment-system)
+6. [Procedural Bone Overrides](#6-procedural-bone-overrides)
+7. [Bounding Boxes & Hitboxes](#7-bounding-boxes--hitboxes)
+8. [Transparency & Water Rendering](#8-transparency--water-rendering)
+9. [Production-Ready Code Examples](#9-production-ready-code-examples)
+   - [BlockEntity Renderer Template](#a-blockentity-renderer)
+   - [LivingEntity / Mob Renderer Template](#b-livingentity-renderer)
+   - [Gun / Weapon / Item In-Hand Renderer Template](#c-gun--item-renderer)
 
-### Main Class
-- `MCglTF` → `CustomGLTF`
-- `MCglTF.getInstance()` → `CustomGLTF.getInstance()`
+---
 
-### Version Changes
-- Minecraft: 1.19.3 → 1.20.1
-- Fabric Loader: 0.14.12 → 0.14.21
-- Fabric API: 0.72.0+1.19.3 → 0.83.1+1.20.1
-- Iris Shaders: Updated to 1.7.5 for 1.20.1
+## 1. Gradle Dependency & Setup
 
-### Iris API Changes
-The Iris package was renamed in newer versions:
-```java
-// Old (1.19.3)
-import net.coderbot.iris.Iris;
-import net.coderbot.iris.pipeline.WorldRenderingPhase;
-
-// New (1.20.1)
-import net.irisshaders.iris.Iris;
-import net.irisshaders.iris.pipeline.WorldRenderingPhase;
-```
-
-### OptiFine Integration
-OptiFine support now uses reflection to avoid compile-time dependencies:
-```java
-// Old: Direct class access (caused compile errors)
-net.optifine.shaders.Shaders.isShaderPackInitialized
-
-// New: Reflection-based (no compile dependency needed)
-Class<?> shadersClass = Class.forName("net.optifine.shaders.Shaders");
-```
-
-### Mod ID
-- `mcgltf` → `customgltf`
-- Resource locations need updating: `new ResourceLocation("customgltf", "...")`
-
-## How to Use CustomGLTF in Your Mod
-
-### 1. Add Dependency
-
-Add to your `build.gradle`:
+Add CustomGLTF to your `build.gradle`:
 ```groovy
 repositories {
     maven {
@@ -62,248 +36,361 @@ repositories {
 }
 
 dependencies {
-    // Add CustomGLTF as a dependency
     modImplementation "curse.maven:customgltf-PROJECT_ID:FILE_ID"
     include "curse.maven:customgltf-PROJECT_ID:FILE_ID"
 }
 ```
 
-Or if you have the JAR locally:
+Or if you are developing locally with the jar in `libs/`:
 ```groovy
 dependencies {
-    modImplementation files("libs/CustomGLTF-1.20.1-Fabric-1.0.0.0.jar")
-    include files("libs/CustomGLTF-1.20.1-Fabric-1.0.0.0.jar")
+    modImplementation files("libs/CustomGLTF-1.2.jar")
+    include files("libs/CustomGLTF-1.2.jar")
 }
 ```
 
-### 2. Add to fabric.mod.json
-
+In `fabric.mod.json`:
 ```json
 {
   "depends": {
-    "customgltf": ">=1.0.0"
+    "customgltf": ">=1.2"
   }
 }
 ```
 
-### 3. Basic Usage
+---
 
-#### Loading a Model
+## 2. Loading a glTF Model
+
+Implement `IGltfModelReceiver` to register and load your `.gltf` or `.glb` model:
 
 ```java
+package mymod.client;
+
 import com.modularmods.customgltf.CustomGLTF;
 import com.modularmods.customgltf.IGltfModelReceiver;
 import com.modularmods.customgltf.RenderedGltfModel;
+import de.javagl.jgltf.model.GltfModel;
 import net.minecraft.resources.ResourceLocation;
+import java.util.List;
 
 public class MyModelLoader implements IGltfModelReceiver {
+
+    public static final MyModelLoader INSTANCE = new MyModelLoader();
     private RenderedGltfModel model;
-    
-    public MyModelLoader() {
-        // Register this receiver to load a model
+
+    public void register() {
         CustomGLTF.getInstance().addGltfModelReceiver(this);
     }
-    
+
     @Override
     public ResourceLocation getModelLocation() {
-        // Return the location of your glTF model file
+        // Points to src/main/resources/assets/mymod/models/my_model.gltf
         return new ResourceLocation("mymod", "models/my_model.gltf");
     }
-    
+
     @Override
     public boolean isReceiveSharedModel(GltfModel gltfModel, List<Runnable> onFinish) {
-        // Return true if you want to receive this model
         return true;
     }
-    
+
     @Override
     public void onReceiveSharedModel(RenderedGltfModel model) {
-        // Store the rendered model for later use
         this.model = model;
     }
+
+    public RenderedGltfModel getModel() {
+        return model;
+    }
 }
 ```
 
-#### Rendering a Model
+---
+
+## 3. Rendering Models
+
+CustomGLTF provides high-level rendering methods that automatically convert `PoseStack` transformations and adapt to Vanilla or Shaderpack (Iris) pipelines.
+
+### One-Line Rendering:
+```java
+import com.modularmods.customgltf.api.GltfRenderHelper;
+
+// Render directly using instance method
+model.render(poseStack);
+
+// Or using static helper
+GltfRenderHelper.renderModel(model, poseStack);
+```
+
+### Color Tinting (e.g. Hurt Flash, Team Colors, Cloaking):
+```java
+// Tint red for damage flash: (r, g, b, a)
+model.renderWithTint(poseStack, 1.0F, 0.3F, 0.3F, 1.0F);
+
+// Semi-transparent ghost mode (50% alpha)
+model.renderWithTint(poseStack, 1.0F, 1.0F, 1.0F, 0.5F);
+```
+
+---
+
+## 4. Animation Controller & State Machine
+
+CustomGLTF includes a modern `GltfAnimationController` that parses all animations from your model by name, supports smooth cross-fading, loop modes, variable playback speed, and keyframe event callbacks.
 
 ```java
+import com.modularmods.customgltf.animation.GltfAnimationController;
+
+// 1. Get the animation controller from the model
+GltfAnimationController anim = model.getAnimationController();
+
+// 2. Play an animation (e.g. "idle" looping)
+anim.play("idle", true);
+
+// 3. Smoothly cross-fade to a new animation (e.g. transition to "run" over 0.2s)
+anim.crossFade("run", 0.2F, true);
+
+// 4. Adjust playback speed (e.g. 1.5x fast-forward or -1.0x reverse)
+anim.setSpeed(1.5F);
+
+// 5. Add timestamp-based sound / particle event callbacks
+anim.addEventListener("reload", 1.25F, () -> {
+    player.playSound(SoundEvents.IRON_TRAPDOOR_OPEN, 1.0F, 1.0F);
+});
+anim.addEventListener("shoot", 0.05F, () -> {
+    level.addParticle(ParticleTypes.FLASH, x, y, z, 0, 0, 0);
+});
+
+// 6. Update in your entity / blockentity tick method
+anim.update(0.05F); // 1 tick = 0.05 seconds (at 20 TPS)
+```
+
+---
+
+## 5. Bone Sockets & Attachment System
+
+Need to attach a gun sight/optic to a weapon rail, spawn muzzle flash particles at the barrel tip, seat a player in a vehicle, or attach a sword to a character's hand? Use `GltfNodeAttachment`:
+
+```java
+import com.modularmods.customgltf.api.GltfNodeAttachment;
+import org.joml.Vector3f;
+
+// 1. Attach and render an item/model onto a bone socket (e.g. "scope_rail")
+poseStack.pushPose();
+if (model.applyNodeTransform("scope_rail", poseStack)) {
+    // Everything rendered here is now positioned & rotated at the scope_rail socket!
+    renderScopeItem(poseStack);
+}
+poseStack.popPose();
+
+// 2. Query 3D world position for particles / projectiles (e.g. "muzzle")
+Vector3f muzzlePos = model.getNodePosition("muzzle");
+if (muzzlePos != null) {
+    level.addParticle(ParticleTypes.SMOKE, 
+        entity.getX() + muzzlePos.x, 
+        entity.getY() + muzzlePos.y, 
+        entity.getZ() + muzzlePos.z, 
+        0, 0.1, 0);
+}
+```
+
+---
+
+## 6. Procedural Bone Overrides
+
+Directly rotate or translate bones from Java code (e.g. rotating tank turrets, aiming gun barrels with player look direction, turning vehicle steering wheels and speedometers):
+
+```java
+import com.modularmods.customgltf.animation.GltfProceduralController;
+
+GltfProceduralController controller = model.getProceduralController();
+
+// Aim turret towards target pitch and yaw (in degrees)
+controller.setNodeRotationDegrees("turret", 0.0F, entity.getYRot(), 0.0F);
+controller.setNodeRotationDegrees("barrel", entity.getXRot(), 0.0F, 0.0F);
+
+// Turn steering wheel based on vehicle steering angle
+controller.setNodeRotationDegrees("steering_wheel", 0.0F, 0.0F, steeringAngle);
+
+// Spin vehicle wheel based on speed
+controller.setNodeRotationDegrees("wheel_FL", wheelRotationDeg, 0.0F, 0.0F);
+
+// Apply overrides before rendering
+controller.applyOverrides();
+```
+
+---
+
+## 7. Bounding Boxes & Hitboxes
+
+Compute exact 3D bounding boxes from your model for hitboxes, selection boxes, or raycasting:
+
+```java
+import net.minecraft.world.phys.AABB;
+
+// Get overall model bounding box
+AABB box = model.getBoundingBox();
+
+// Use for custom entity collision / interaction box
+entity.setBoundingBox(box.move(entity.position()));
+```
+
+---
+
+## 8. Transparency & Water Rendering
+
+CustomGLTF automatically processes glTF 2.0 `alphaMode`:
+- **`MASK` (Cutout)**: Discards transparent pixels (`discard;`), allowing water, glass, and translucent particles behind the model to be rendered correctly without void holes.
+- **`BLEND` (Translucent)**: Enables hardware alpha blending.
+- **`OPAQUE` (Solid)**: Renders fully opaque geometry.
+
+If your model has transparent glass or cutout grates, it will work automatically without any extra configuration!
+
+---
+
+## 9. Production-Ready Code Examples
+
+### A. BlockEntity Renderer
+
+```java
+package mymod.client.renderer;
+
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.math.Axis;
+import com.modularmods.customgltf.RenderedGltfModel;
+import com.modularmods.customgltf.api.GltfRenderHelper;
+import mymod.block.entity.CustomMachineBlockEntity;
+import mymod.client.MyModelLoader;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
+import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 
-public void renderMyModel(PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
-    if (model != null) {
-        poseStack.pushPose();
-        
-        // Position and scale your model
-        poseStack.translate(0.5, 0.0, 0.5);
-        poseStack.scale(1.0f, 1.0f, 1.0f);
-        
-        // Render all scenes in the model
-        for (RenderedGltfScene scene : model.renderedGltfScenes) {
-            scene.renderForPlayer(poseStack);
-        }
-        
-        poseStack.popPose();
+public class CustomMachineRenderer implements BlockEntityRenderer<CustomMachineBlockEntity> {
+
+    public CustomMachineRenderer(BlockEntityRendererProvider.Context ctx) {
     }
-}
-```
 
-#### Animations
-
-```java
-import com.modularmods.customgltf.animation.GltfAnimationCreator;
-import com.modularmods.customgltf.animation.InterpolatedChannel;
-
-public class AnimatedModel {
-    private List<InterpolatedChannel> animations;
-    private float animationTime = 0.0f;
-    
-    public void setupAnimations(RenderedGltfModel model) {
-        // Get the first animation
-        if (!model.gltfAnimations.isEmpty()) {
-            animations = model.gltfAnimations.get(0);
-        }
-    }
-    
-    public void tick() {
-        animationTime += 0.05f; // Adjust speed as needed
-        
-        if (animations != null) {
-            for (InterpolatedChannel channel : animations) {
-                channel.update(animationTime);
-            }
-        }
-    }
-}
-```
-
-### 4. Loading Models from Resources
-
-Place your glTF files in your mod's resources:
-```
-src/main/resources/
-  assets/
-    mymod/
-      models/
-        my_model.gltf
-        my_model.bin
-        textures/
-          my_texture.png
-```
-
-For external resources (using extras):
-```java
-// In your glTF file, add extras to buffers/images:
-{
-  "buffers": [{
-    "uri": "data.bin",
-    "byteLength": 1024,
-    "extras": {
-      "resourceLocation": "mymod:models/data.bin"
-    }
-  }]
-}
-```
-
-### 5. Shader Support
-
-CustomGLTF automatically integrates with:
-- **Iris Shaders**: Full support for shader packs
-- **OptiFine**: Via OptiFabric (using reflection)
-
-The library handles normal maps and specular maps when shaders are active.
-
-## OpenGL Profiles
-
-CustomGLTF supports different OpenGL profiles for compatibility:
-
-- **GL43**: Best performance, uses compute shaders (OpenGL 4.3+)
-- **GL40**: Good performance, uses transform feedback (OpenGL 4.0+)
-- **GL33**: Compatible mode (OpenGL 3.3+)
-- **GL30**: CPU skinning fallback (OpenGL 3.0+)
-- **AUTO**: Automatically selects best available
-
-Users can configure this in `config/customgltf.properties`:
-```properties
-RenderedModelGLProfile=AUTO
-```
-
-## Example: Block Entity with glTF Model
-
-```java
-public class MyBlockEntity extends BlockEntity {
-    private static MyModelLoader modelLoader;
-    
-    static {
-        // Initialize once
-        modelLoader = new MyModelLoader();
-    }
-    
-    public MyBlockEntity(BlockPos pos, BlockState state) {
-        super(MY_BLOCK_ENTITY, pos, state);
-    }
-}
-
-public class MyBlockEntityRenderer implements BlockEntityRenderer<MyBlockEntity> {
     @Override
-    public void render(MyBlockEntity entity, float partialTick, PoseStack poseStack,
+    public void render(CustomMachineBlockEntity be, float partialTick, PoseStack poseStack,
                        MultiBufferSource bufferSource, int packedLight, int packedOverlay) {
-        
+        RenderedGltfModel model = MyModelLoader.INSTANCE.getModel();
+        if (model == null) return;
+
         poseStack.pushPose();
-        poseStack.translate(0.5, 0, 0.5);
         
-        // Render the glTF model
-        MyBlockEntity.modelLoader.render(poseStack, packedLight);
+        // Center on block
+        poseStack.translate(0.5, 0.0, 0.5);
         
+        // Rotate according to block facing
+        poseStack.mulPose(Axis.YP.rotationDegrees(be.getBlockFacing().toYRot()));
+
+        // Update animation
+        model.getAnimationController().update(partialTick * 0.05F);
+
+        // Render model
+        model.render(poseStack);
+
         poseStack.popPose();
     }
 }
 ```
 
-## Common Issues
+---
 
-### Models don't load
-- Check that the glTF file path is correct
-- Ensure the model is in your mod's resources
-- Check logs for parsing errors
+### B. LivingEntity Renderer
 
-### Textures are missing
-- Make sure texture files are in the correct location
-- Check that URIs in the glTF file match your resource paths
-- Use extras.resourceLocation for custom resource locations
+```java
+package mymod.client.renderer;
 
-### Performance issues
-- Try a different OpenGL profile
-- Reduce model complexity
-- Check if animations are too complex
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.math.Axis;
+import com.modularmods.customgltf.RenderedGltfModel;
+import mymod.client.MyModelLoader;
+import mymod.entity.CustomBossEntity;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.resources.ResourceLocation;
 
-### Shader compatibility
-- Update Iris to latest version
-- Ensure shader pack supports PBR materials
-- Check logs for shader-related errors
+public class CustomBossRenderer extends EntityRenderer<CustomBossEntity> {
 
-## Building from Source
+    public CustomBossRenderer(EntityRendererProvider.Context ctx) {
+        super(ctx);
+    }
 
-```bash
-# Set Java 17-21 (not Java 24!)
-set JAVA_HOME=C:\Program Files\Java\jdk-21.0.10
+    @Override
+    public void render(CustomBossEntity entity, float entityYaw, float partialTick,
+                       PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
+        RenderedGltfModel model = MyModelLoader.INSTANCE.getModel();
+        if (model == null) return;
 
-# Build
-gradlew build
+        poseStack.pushPose();
 
-# Output: build/libs/CustomGLTF-1.20.1-Fabric-1.0.0.0.jar
+        // Rotate to entity look direction
+        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - entityYaw));
+
+        // Procedural head aim
+        model.getProceduralController()
+             .setNodeRotationDegrees("head", entity.getXRot(), 0.0F, 0.0F)
+             .applyOverrides();
+
+        // Hurt flash effect (tint red when damaged)
+        if (entity.hurtTime > 0) {
+            model.renderWithTint(poseStack, 1.0F, 0.4F, 0.4F, 1.0F);
+        } else {
+            model.render(poseStack);
+        }
+
+        poseStack.popPose();
+        super.render(entity, entityYaw, partialTick, poseStack, bufferSource, packedLight);
+    }
+
+    @Override
+    public ResourceLocation getTextureLocation(CustomBossEntity entity) {
+        return null;
+    }
+}
 ```
 
-## Credits
+---
 
-- Original MCglTF by TimLee9024
-- JglTF library by Marco Hutter
-- Port to 1.20.1 and rename by Maiky
+### C. Gun / Item Renderer
 
-## License
+```java
+package mymod.client.renderer;
 
-MIT License - Same as original MCglTF
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.modularmods.customgltf.RenderedGltfModel;
+import mymod.client.GunModelLoader;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
 
-## Support
+public class CustomGunRenderer {
 
-For issues or questions, please create an issue on the GitHub repository or leave a comment on CurseForge.
+    public static void renderGun(ItemStack stack, ItemDisplayContext transformType,
+                                 PoseStack poseStack, MultiBufferSource bufferSource,
+                                 int packedLight, int packedOverlay) {
+        RenderedGltfModel gunModel = GunModelLoader.INSTANCE.getModel();
+        if (gunModel == null) return;
+
+        poseStack.pushPose();
+
+        // Render base gun
+        gunModel.render(poseStack);
+
+        // Attach optic / scope if present in item NBT
+        if (stack.hasTag() && stack.getTag().contains("Optic")) {
+            poseStack.pushPose();
+            if (gunModel.applyNodeTransform("scope_mount", poseStack)) {
+                RenderedGltfModel opticModel = GunModelLoader.OPTIC_RED_DOT.getModel();
+                if (opticModel != null) {
+                    opticModel.render(poseStack);
+                }
+            }
+            poseStack.popPose();
+        }
+
+        poseStack.popPose();
+    }
+}
+```

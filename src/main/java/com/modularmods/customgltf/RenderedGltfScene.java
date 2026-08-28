@@ -3,7 +3,6 @@ package com.modularmods.customgltf;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
@@ -13,10 +12,13 @@ import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GL40;
 import org.lwjgl.opengl.GL43;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferUploader;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.ShaderInstance;
 
 public class RenderedGltfScene {
 
@@ -26,13 +28,7 @@ public class RenderedGltfScene {
 	
 	public final List<Runnable> shaderModRenderCommands = new ArrayList<Runnable>();
 	
-	public void renderForVanilla() {
-		int currentProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-		int currentVAO = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
-		int currentArrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
-		int currentElementArrayBuffer = GL11.glGetInteger(GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING);
-		boolean currentCullFace = GL11.glGetBoolean(GL11.GL_CULL_FACE);
-		
+	protected void performSkinning() {
 		if(!skinningCommands.isEmpty()) {
 			GL20.glUseProgram(CustomGLTF.getInstance().getGlProgramSkinnig());
 			GL11.glEnable(GL30.GL_RASTERIZER_DISCARD);
@@ -41,112 +37,116 @@ public class RenderedGltfScene {
 			GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
 			GL11.glDisable(GL30.GL_RASTERIZER_DISCARD);
 		}
+	}
+
+	public void renderForVanilla() {
+		CustomGLTF.checkAndWarnShaders();
+
+		int prevProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+		int prevVAO = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+		int prevArrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
+		int prevElementArrayBuffer = GL11.glGetInteger(GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING);
+		boolean prevCull = GL11.glGetBoolean(GL11.GL_CULL_FACE);
+		boolean prevBlend = GL11.glGetBoolean(GL11.GL_BLEND);
+		boolean prevDepthTest = GL11.glGetBoolean(GL11.GL_DEPTH_TEST);
+		boolean prevDepthMask = GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK);
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE = GameRenderer.getRendertypeEntitySolidShader();
-		int entitySolidProgram = RenderedGltfModel.CURRENT_SHADER_INSTANCE.getId();
-		GL20.glUseProgram(entitySolidProgram);
+		int prevActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+		GlStateManager._activeTexture(GL13.GL_TEXTURE2);
+		int prevTex2 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+		GlStateManager._activeTexture(GL13.GL_TEXTURE1);
+		int prevTex1 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+		GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+		int prevTex0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.PROJECTION_MATRIX.set(RenderSystem.getProjectionMatrix());
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.PROJECTION_MATRIX.upload();
+		performSkinning();
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.INVERSE_VIEW_ROTATION_MATRIX.set(RenderSystem.getInverseViewRotationMatrix());
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.INVERSE_VIEW_ROTATION_MATRIX.upload();
+		RenderedGltfModel.CURRENT_SHADER_INSTANCE = GameRenderer.getRendertypeEntityCutoutShader();
+		ShaderInstance shaderInstance = RenderedGltfModel.CURRENT_SHADER_INSTANCE;
+		int entityProgram = shaderInstance.getId();
+		GL20.glUseProgram(entityProgram);
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_START.set(RenderSystem.getShaderFogStart());
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_START.upload();
+		shaderInstance.PROJECTION_MATRIX.set(RenderSystem.getProjectionMatrix());
+		shaderInstance.PROJECTION_MATRIX.upload();
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_END.set(RenderSystem.getShaderFogEnd());
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_END.upload();
+		shaderInstance.INVERSE_VIEW_ROTATION_MATRIX.set(RenderSystem.getInverseViewRotationMatrix());
+		shaderInstance.INVERSE_VIEW_ROTATION_MATRIX.upload();
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_COLOR.set(RenderSystem.getShaderFogColor());
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_COLOR.upload();
+		shaderInstance.FOG_START.set(RenderSystem.getShaderFogStart());
+		shaderInstance.FOG_START.upload();
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_SHAPE.set(RenderSystem.getShaderFogShape().getIndex());
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.FOG_SHAPE.upload();
+		shaderInstance.FOG_END.set(RenderSystem.getShaderFogEnd());
+		shaderInstance.FOG_END.upload();
 		
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.COLOR_MODULATOR.set(1.0F, 1.0F, 1.0F, 1.0F);
-		RenderedGltfModel.CURRENT_SHADER_INSTANCE.COLOR_MODULATOR.upload();
+		shaderInstance.FOG_COLOR.set(RenderSystem.getShaderFogColor());
+		shaderInstance.FOG_COLOR.upload();
 		
-		int sampler0Loc = GL20.glGetUniformLocation(entitySolidProgram, "Sampler0");
+		shaderInstance.FOG_SHAPE.set(RenderSystem.getShaderFogShape().getIndex());
+		shaderInstance.FOG_SHAPE.upload();
+		
+		shaderInstance.COLOR_MODULATOR.set(RenderSystem.getShaderColor());
+		shaderInstance.COLOR_MODULATOR.upload();
+		
+		int sampler0Loc = GL20.glGetUniformLocation(entityProgram, "Sampler0");
 		if (sampler0Loc != -1) GL20.glUniform1i(sampler0Loc, 0);
-		int sampler1Loc = GL20.glGetUniformLocation(entitySolidProgram, "Sampler1");
+		int sampler1Loc = GL20.glGetUniformLocation(entityProgram, "Sampler1");
 		if (sampler1Loc != -1) GL20.glUniform1i(sampler1Loc, 1);
-		int sampler2Loc = GL20.glGetUniformLocation(entitySolidProgram, "Sampler2");
+		int sampler2Loc = GL20.glGetUniformLocation(entityProgram, "Sampler2");
 		if (sampler2Loc != -1) GL20.glUniform1i(sampler2Loc, 2);
 		
-		RenderSystem.setupShaderLights(RenderedGltfModel.CURRENT_SHADER_INSTANCE);
-		RenderedGltfModel.LIGHT0_DIRECTION = new Vector3f(RenderedGltfModel.CURRENT_SHADER_INSTANCE.LIGHT0_DIRECTION.getFloatBuffer());
-		RenderedGltfModel.LIGHT1_DIRECTION = new Vector3f(RenderedGltfModel.CURRENT_SHADER_INSTANCE.LIGHT1_DIRECTION.getFloatBuffer());
+		Minecraft.getInstance().gameRenderer.overlayTexture().setupOverlayColor();
+		Minecraft.getInstance().gameRenderer.lightTexture().turnOnLightLayer();
+		GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+		
+		RenderSystem.setupShaderLights(shaderInstance);
+		RenderedGltfModel.LIGHT0_DIRECTION = new Vector3f(shaderInstance.LIGHT0_DIRECTION.getFloatBuffer());
+		RenderedGltfModel.LIGHT1_DIRECTION = new Vector3f(shaderInstance.LIGHT1_DIRECTION.getFloatBuffer());
+		
+		// Set default vertex attributes
+		GL20.glVertexAttrib4f(RenderedGltfModel.vaColor, 1.0F, 1.0F, 1.0F, 1.0F);
+		GL30.glVertexAttribI2i(RenderedGltfModel.vaUV1, 0, 10);
+		GL30.glVertexAttribI2i(RenderedGltfModel.vaUV2, 240, 240);
+		
+		GlStateManager._enableDepthTest();
+		GlStateManager._depthMask(true);
+		GlStateManager._enableBlend();
+		GlStateManager._blendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
 		
 		vanillaRenderCommands.forEach(Runnable::run);
 		
-		if(currentCullFace) GL11.glEnable(GL11.GL_CULL_FACE);
-		else GL11.glDisable(GL11.GL_CULL_FACE);
+		// Restore GL state
+		GlStateManager._depthMask(prevDepthMask);
+		if (prevDepthTest) GlStateManager._enableDepthTest();
+		else GlStateManager._disableDepthTest();
 		
-		GL30.glBindVertexArray(currentVAO);
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, currentArrayBuffer);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, currentElementArrayBuffer);
+		if (prevCull) GlStateManager._enableCull();
+		else GlStateManager._disableCull();
 		
-		GL20.glUseProgram(currentProgram);
+		if (prevBlend) GlStateManager._enableBlend();
+		else GlStateManager._disableBlend();
 		
+		GlStateManager._activeTexture(GL13.GL_TEXTURE2);
+		GlStateManager._bindTexture(prevTex2);
+		GlStateManager._activeTexture(GL13.GL_TEXTURE1);
+		GlStateManager._bindTexture(prevTex1);
+		GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+		GlStateManager._bindTexture(prevTex0);
+		GlStateManager._activeTexture(prevActiveTexture);
+		
+		GlStateManager._glBindVertexArray(prevVAO);
+		GlStateManager._glBindBuffer(GL15.GL_ARRAY_BUFFER, prevArrayBuffer);
+		GlStateManager._glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, prevElementArrayBuffer);
+		
+		GlStateManager._glUseProgram(prevProgram);
+		Minecraft.getInstance().gameRenderer.overlayTexture().teardownOverlayColor();
+		Minecraft.getInstance().gameRenderer.lightTexture().turnOffLightLayer();
 		BufferUploader.reset();
 		
 		RenderedGltfModel.NODE_GLOBAL_TRANSFORMATION_LOOKUP_CACHE.clear();
 	}
 	
 	public void renderForShaderMod() {
-		int currentProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-		int currentVAO = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
-		int currentArrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
-		int currentElementArrayBuffer = GL11.glGetInteger(GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING);
-		boolean currentCullFace = GL11.glGetBoolean(GL11.GL_CULL_FACE);
-		
-		if(!skinningCommands.isEmpty()) {
-			GL20.glUseProgram(CustomGLTF.getInstance().getGlProgramSkinnig());
-			GL11.glEnable(GL30.GL_RASTERIZER_DISCARD);
-			skinningCommands.forEach(Runnable::run);
-			GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, 0);
-			GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, 0);
-			GL11.glDisable(GL30.GL_RASTERIZER_DISCARD);
-			GL20.glUseProgram(currentProgram);
-		}
-		
-		RenderedGltfModel.MODEL_VIEW_MATRIX = GL20.glGetUniformLocation(currentProgram, "modelViewMatrix");
-		RenderedGltfModel.MODEL_VIEW_MATRIX_INVERSE = GL20.glGetUniformLocation(currentProgram, "modelViewMatrixInverse");
-		RenderedGltfModel.NORMAL_MATRIX = GL20.glGetUniformLocation(currentProgram, "normalMatrix");
-		
-		Matrix4f projectionMatrix = RenderSystem.getProjectionMatrix();
-		projectionMatrix.get(RenderedGltfModel.BUF_FLOAT_16);
-		GL20.glUniformMatrix4fv(GL20.glGetUniformLocation(currentProgram, "projectionMatrix"), false, RenderedGltfModel.BUF_FLOAT_16);
-		(new Matrix4f(projectionMatrix)).invert().get(RenderedGltfModel.BUF_FLOAT_16);
-		GL20.glUniformMatrix4fv(GL20.glGetUniformLocation(currentProgram, "projectionMatrixInverse"), false, RenderedGltfModel.BUF_FLOAT_16);
-		
-		GL13.glActiveTexture(GL13.GL_TEXTURE3);
-		int currentTexture3 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
-		GL13.glActiveTexture(GL13.GL_TEXTURE1);
-		int currentTexture1 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
-		GL13.glActiveTexture(GL13.GL_TEXTURE0);
-		int currentTexture0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
-		
-		shaderModRenderCommands.forEach(Runnable::run);
-		
-		GL13.glActiveTexture(GL13.GL_TEXTURE3);
-		GL11.glBindTexture(GL11.GL_TEXTURE_2D, currentTexture3);
-		GL13.glActiveTexture(GL13.GL_TEXTURE1);
-		GL11.glBindTexture(GL11.GL_TEXTURE_2D, currentTexture1);
-		GL13.glActiveTexture(GL13.GL_TEXTURE0);
-		GL11.glBindTexture(GL11.GL_TEXTURE_2D, currentTexture0);
-		
-		if(currentCullFace) GL11.glEnable(GL11.GL_CULL_FACE);
-		else GL11.glDisable(GL11.GL_CULL_FACE);
-		
-		GL30.glBindVertexArray(currentVAO);
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, currentArrayBuffer);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, currentElementArrayBuffer);
-		
-		BufferUploader.reset();
-		
-		RenderedGltfModel.NODE_GLOBAL_TRANSFORMATION_LOOKUP_CACHE.clear();
+		renderForVanilla();
 	}
 
 }

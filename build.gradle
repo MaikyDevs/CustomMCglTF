@@ -22,8 +22,23 @@ repositories {
 			includeGroup "curse.maven"
 		}
 	}
+	maven {
+		name = "Modrinth"
+		url = "https://api.modrinth.com/maven"
+		content {
+			includeGroup "maven.modrinth"
+		}
+	}
 	flatDir {
 		dirs 'libs'
+	}
+}
+
+configurations.configureEach {
+	resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+		if (details.requested.group == 'org.lwjgl') {
+			details.useVersion '3.3.1'
+		}
 	}
 }
 
@@ -39,8 +54,6 @@ dependencies {
 	// Uncomment the following line to enable the deprecated Fabric API modules. 
 	// These are included in the Fabric API production distribution and allow you to update your mod to the latest modules at a later more convenient time.
 
-	// modImplementation "net.fabricmc.fabric-api:fabric-api-deprecated:${project.fabric_version}"
-	modImplementation "curse.maven:irisshaders-455508:5789255"
 	implementation fileTree(dir: 'libs', include: '*.jar')
 }
 

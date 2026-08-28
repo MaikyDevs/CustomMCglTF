@@ -300,7 +300,13 @@ public class MathUtils
      */
     public static void quaternionToMatrix4x4(float q[], float m[])
     {
-        float invLength = 1.0f / (float)Math.sqrt(dot(q, q));
+        float lengthSquared = dot(q, q);
+        if (lengthSquared < 1e-8f)
+        {
+            setIdentity4x4(m);
+            return;
+        }
+        float invLength = 1.0f / (float)Math.sqrt(lengthSquared);
 
         // Adapted from javax.vecmath.Matrix4f
         float qx = q[0] * invLength;

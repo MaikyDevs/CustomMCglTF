@@ -15,6 +15,7 @@ public abstract class StepInterpolatedChannel extends InterpolatedChannel {
 	
 	@Override
 	public void update(float timeS) {
+		if(timesS == null || timesS.length == 0) return;
 		float[] output = getListener();
 		System.arraycopy(values[computeIndex(timeS, timesS)], 0, output, 0, output.length);
 	}
